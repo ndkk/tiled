@@ -43,6 +43,9 @@
 
 #include <memory>
 
+#include <QtWidgets/QInputDialog>
+#include <QtWidgets/QMessageBox>
+
 using namespace Tiled;
 
 namespace Flare {
@@ -289,12 +292,12 @@ std::unique_ptr<Tiled::Map> FlarePlugin::read(const QString &fileName)
 
 bool FlarePlugin::supportsFile(const QString &fileName) const
 {
-    return fileName.endsWith(QLatin1String(".txt"), Qt::CaseInsensitive);
+    return true;
 }
 
 QString FlarePlugin::nameFilter() const
 {
-    return tr("Flare map files (*.txt)");
+    return tr("Flare map files (*.tt *.tm)");
 }
 
 QString FlarePlugin::shortName() const
@@ -307,9 +310,10 @@ QString FlarePlugin::errorString() const
     return mError;
 }
 
-bool FlarePlugin::write(const Tiled::Map *map, const QString &fileName, Options options)
+bool FlarePlugin::writeMap(const Tiled::Map *map, const QString &fileName)
 {
-    Q_UNUSED(options)
+    QString srcFileName = fileName;
+    QString dstFileName = srcFileName.replace(".tm", ".txt");
 
     SaveFile file(fileName);
 
@@ -415,7 +419,96 @@ bool FlarePlugin::write(const Tiled::Map *map, const QString &fileName, Options 
         return false;
     }
 
-    return true;
+    QFile::remove(dstFileName);
+    return QFile::rename(fileName, dstFileName);
+}
+
+bool FlarePlugin::writeTileset(const Tiled::Map *map, const QString &fileName)
+{
+    QString srcFileName = fileName;
+    QString dstFileName = srcFileName.replace(".tt", ".txt");
+
+    SaveFile file(fileName);
+
+    if (!file.open(QFile::WriteOnly | QFile::Text)) {
+        mError = QCoreApplication::translate("File Errors", "Could not open file for writing.");
+        return false;
+    }
+
+    QTextStream out(file.device());
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+    out.setCodec("UTF-8");
+#endif
+
+    QString title = "Hero";
+    QString label = "Where are the tilesets images located in your mod?";
+    QString text = "images/tilesets/";
+    QString inputTxt = QInputDialog::getText(NULL, title, label, QLineEdit::Normal, text);
+
+    for (const SharedTileset &tileset : map->tilesets()) {
+
+        if (tileset->name() == "collision" || tileset->name() == "set_rules"){
+            continue;
+        }
+
+        out << "[tileset]\n";
+        QString filename_tset = tileset->imageSourceString();
+        int lastSlash = filename_tset.lastIndexOf("/");
+        filename_tset = filename_tset.mid(lastSlash+1);
+        out << "img=" << inputTxt << filename_tset << "\n";
+        for (int j = 0; j < tileset->tileCount(); j++) {
+            Tile *tile = tileset->tileAt(j);
+
+            int tile_id = tileToGlobalID(map, tile);
+            int tile_w = tile->width();
+            int tile_h = tile->height();
+            int tiles_per_row = tile->image().width() /tile_w;
+            int left_x = (tile->id() % tiles_per_row) * tile_w;
+            int top_y = (tile->id() / tiles_per_row) * tile_h;
+            int off_x = (map->tileHeight() / 2 ) - tile->offset().x();
+            int off_y = tile_h - (map->tileHeight() / 2) - tile->offset().y();
+            out << "tile=" << tile_id << "," << left_x<< "," << top_y<< "," << tile_w<< "," << tile_h<< "," << off_x << "," << off_y;
+            out << "\n";
+        }
+        out << "\n\n";
+    }
+
+    if (!file.commit()) {
+        mError = file.errorString();
+        return false;
+    }
+
+    QFile::remove(dstFileName);
+    return QFile::rename(fileName, dstFileName);
+}
+
+int FlarePlugin::tileToGlobalID(const Tiled::Map *map, const Tiled::Tile *tile){
+    int firstgid = 0;
+    for (int i = 0; i < map->tilesets().length(); i++) {
+        if (i > 0) {
+            firstgid += map->tilesetAt(i-1)->tileCount();
+        }
+
+        if (map->tilesetAt(i)->name() == tile->tileset()->name()){
+            return firstgid + tile->id() + 1;
+        }
+    }
+    return 0;
+}
+
+bool FlarePlugin::write(const Tiled::Map *map, const QString &fileName, Options options)
+{
+    Q_UNUSED(options)
+
+    if (fileName.contains(".tm")){
+        return writeMap(map, fileName);
+    }
+    else if (fileName.contains(".tt")){
+        return writeTileset(map, fileName);
+    }
+    else{
+        return false;
+    }
 }
 
 void FlarePlugin::writeProperties(QTextStream &out, const Properties &properties, const ExportContext &context)

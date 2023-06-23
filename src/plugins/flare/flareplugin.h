@@ -49,6 +49,10 @@ public:
     QString errorString() const override;
 
 private:
+    bool writeMap(const Tiled::Map *map, const QString &fileName);
+    bool writeTileset(const Tiled::Map *map, const QString &fileName);
+    int tileToGlobalID(const Tiled::Map *map, const Tiled::Tile *tile);
+
     void writeProperties(QTextStream &out,
                          const Tiled::Properties &properties,
                          const Tiled::ExportContext &context);
